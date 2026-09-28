@@ -339,6 +339,68 @@ describe('run_notebook', () => {
     ]);
   });
 
+  test('passes each database cell the result budget earlier cells left', async () => {
+    const platform = createSupabaseApiPlatform({
+      accessToken: ACCESS_TOKEN,
+      apiUrl: API_URL,
+    });
+    const executeSql = vi.spyOn(platform.database!, 'executeSql');
+    const { callTool } = await setup({ platform, features: RUN_FEATURES });
+    const { project, notebook } = await createNotebookFixture([
+      { id: 'first', type: 'database', sql: 'select 1 as one', row_limit: 100 },
+      {
+        id: 'second',
+        type: 'database',
+        sql: 'select 1 as one',
+        row_limit: 100,
+      },
+    ]);
+
+    await callTool({
+      name: 'run_notebook',
+      arguments: runArgs(project, notebook),
+    });
+
+    const firstRowsBytes = JSON.stringify([{ one: 1 }]).length;
+    expect(
+      executeSql.mock.calls.map(([, options]) => options.max_result_bytes)
+    ).toEqual([1_000_000, 1_000_000 - firstRowsBytes]);
+  });
+
+  test('a cell whose rows exceed the run budget fails without stopping later cells', async () => {
+    const { callTool } = await setup({ features: RUN_FEATURES });
+    const { project, notebook } = await createNotebookFixture([
+      {
+        id: 'big',
+        type: 'database',
+        sql: "select repeat('x', 1000000) as big",
+        row_limit: 100,
+      },
+      { id: 'one', type: 'database', sql: 'select 1 as one', row_limit: 100 },
+    ]);
+
+    const result = await callTool({
+      name: 'run_notebook',
+      arguments: runArgs(project, notebook),
+    });
+
+    expect(parseCellResults(result.cells)).toEqual([
+      {
+        cell_id: 'big',
+        type: 'database',
+        status: 'error',
+        error:
+          'The query ran, but its result is larger than the 1000000 bytes left for this run, so no rows were returned. Add a LIMIT or select fewer columns.',
+      },
+      {
+        cell_id: 'one',
+        type: 'database',
+        status: 'success',
+        rows: [{ one: 1 }],
+      },
+    ]);
+  });
+
   test('rejects a run when the notebook changed since expected_updated_at', async () => {
     const { callTool } = await setup({ features: RUN_FEATURES });
     const { project, notebook } = await createNotebookFixture([
@@ -1039,6 +1101,7 @@ describe('run_notebook', () => {
         expect(executeSql).toHaveBeenCalledWith(project.id, {
           query: 'delete from films',
           read_only: true,
+          max_result_bytes: 1_000_000,
         });
         expect(
           parseCellResults(parseToolResult(result as CallToolResult).cells)
