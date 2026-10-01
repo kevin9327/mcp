@@ -20,6 +20,7 @@ import { hashObject } from '../util.js';
 import {
   actionOnlyElicitationSchema,
   applyMigrationStateSchema,
+  hasMatchingConfirmationState,
   inspectConfirmationState,
   type ElicitationState,
   executeSqlStateSchema,
@@ -51,8 +52,13 @@ type DatabaseOperationToolsOptions = {
 };
 
 // Why a SQL call needs confirmation, as shown in the prompt. Adds `oversized`
-// to the classifier's reasons so SQL over the size cap gets its own wording.
-type SqlConfirmationPromptReason = SqlConfirmationReason | 'oversized';
+// to the classifier's reasons so SQL over the size cap gets its own wording,
+// and `reconfirm` for a resend of a confirmation this server already issued
+// that the classifier no longer flags.
+type SqlConfirmationPromptReason =
+  | SqlConfirmationReason
+  | 'oversized'
+  | 'reconfirm';
 
 const SQL_CONFIRMATION_REASONS: Record<SqlConfirmationReason, true> = {
   destructive: true,
@@ -114,6 +120,8 @@ function sqlConfirmationFirstLine(reason: SqlConfirmationPromptReason) {
       return 'Could not check for destructive operations because the SQL syntax could not be classified. Approving will allow an attempt to execute the original SQL.';
     case 'oversized':
       return 'Could not check for destructive operations because the SQL is too large to check. Approving will allow an attempt to execute the original SQL.';
+    case 'reconfirm':
+      return 'This SQL was flagged for confirmation earlier and still needs your approval.';
   }
 }
 
@@ -509,21 +517,31 @@ export function getDatabaseTools({
               ),
             });
 
-          const confirmationState = inspectConfirmationState({
+          const stateOptions = {
             ctx,
             tool: 'apply_migration',
             schema: applyMigrationStateSchema,
-            requestKey: 'confirm_destructive',
-            argsMatch: (state) =>
+            argsMatch: (state: z.infer<typeof applyMigrationStateSchema>) =>
               state.project_id === project_id &&
               state.name === name &&
               state.queryHash === queryHash,
+          } as const;
+          const confirmationState = inspectConfirmationState({
+            ...stateOptions,
+            requestKey: 'confirm_destructive',
             declinedText: 'Migration was declined.',
             cancelledText: 'Migration was cancelled.',
           });
 
           if (confirmationState.kind !== 'proceed') {
-            const reason = await classifySql(query, ctx);
+            // Once this server has issued a confirmation for this exact
+            // migration, only an accepted resend runs it, whatever the
+            // classifier says now.
+            const reason =
+              (await classifySql(query, ctx)) ??
+              (hasMatchingConfirmationState(stateOptions)
+                ? 'reconfirm'
+                : undefined);
             if (reason) {
               return confirmationState.kind === 'reprompt'
                 ? await askForConfirmation(reason)
@@ -579,19 +597,29 @@ export function getDatabaseTools({
               ),
             });
 
-          const confirmationState = inspectConfirmationState({
+          const stateOptions = {
             ctx,
             tool: 'execute_sql',
             schema: executeSqlStateSchema,
-            requestKey: 'confirm_destructive',
-            argsMatch: (state) =>
+            argsMatch: (state: z.infer<typeof executeSqlStateSchema>) =>
               state.project_id === project_id && state.queryHash === queryHash,
+          } as const;
+          const confirmationState = inspectConfirmationState({
+            ...stateOptions,
+            requestKey: 'confirm_destructive',
             declinedText: 'SQL execution was declined.',
             cancelledText: 'SQL execution was cancelled.',
           });
 
           if (confirmationState.kind !== 'proceed') {
-            const reason = await classifySql(query, ctx);
+            // Once this server has issued a confirmation for this exact
+            // query, only an accepted resend runs it, whatever the classifier
+            // says now.
+            const reason =
+              (await classifySql(query, ctx)) ??
+              (hasMatchingConfirmationState(stateOptions)
+                ? 'reconfirm'
+                : undefined);
             if (reason) {
               return confirmationState.kind === 'reprompt'
                 ? await askForConfirmation(reason)
