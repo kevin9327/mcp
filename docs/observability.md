@@ -26,6 +26,37 @@ Only the handler owns `end`. Tool code receives an optional safe, synchronous re
 
 The observer factory must not return a Promise. An unsupported Promise return is discarded, with its rejection consumed.
 
+### Usage example
+
+This example uses the console as a local sink; the host can choose a bounded metrics collector instead.
+
+```typescript
+import {
+  createMcpServer,
+  type RequestObserver,
+} from '@supabase/mcp-utils';
+
+const observer: RequestObserver = ({ method, tool }) => {
+  return {
+    record({ kind, feature }) {
+      console.info({ method, tool, kind, feature });
+    },
+    end({ result, durationMs }) {
+      console.info({ method, tool, result, durationMs });
+    },
+  };
+};
+
+const server = createMcpServer({
+  name: 'example',
+  version: '1.0.0',
+  tools: {},
+  observer,
+});
+```
+
+Omit `observer` when collection is disabled; the package calls `end` for you.
+
 ## Request scope
 
 | `ObservedMethod` | Tool classification |
