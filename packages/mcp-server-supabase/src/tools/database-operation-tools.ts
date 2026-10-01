@@ -537,6 +537,11 @@ export function getDatabaseTools({
             cancelledText: 'Migration was cancelled.',
           });
 
+          // A decline or cancel ends the request before classifying, so a
+          // classifier failure can't hide the user's answer.
+          if (confirmationState.kind === 'answered') {
+            return confirmationState.result;
+          }
           if (confirmationState.kind !== 'proceed') {
             // Once this server has issued a confirmation for this exact
             // migration, only an accepted resend runs it, whatever the
@@ -615,6 +620,11 @@ export function getDatabaseTools({
             cancelledText: 'SQL execution was cancelled.',
           });
 
+          // A decline or cancel ends the request before classifying, so a
+          // classifier failure can't hide the user's answer.
+          if (confirmationState.kind === 'answered') {
+            return confirmationState.result;
+          }
           if (confirmationState.kind !== 'proceed') {
             // Once this server has issued a confirmation for this exact
             // query, only an accepted resend runs it, whatever the classifier

@@ -136,6 +136,8 @@ type ConfirmationStateOptions<S extends ConfirmationState> = {
 type ConfirmationDecision<S extends ConfirmationState> =
   | { kind: 'proceed'; state: S }
   | { kind: 'reprompt' }
+  // The user declined or cancelled the confirmation this state was issued for.
+  | { kind: 'answered'; result: CallToolResult }
   | { kind: 'terminal'; result: CallToolResult };
 
 export async function checkConfirmationState<S extends ConfirmationState>(
@@ -151,9 +153,14 @@ export async function checkConfirmationState<S extends ConfirmationState>(
     )
 > {
   const decision = inspectConfirmationState(options);
-  return decision.kind === 'reprompt'
-    ? { kind: 'reprompt', result: await options.askForConfirmation() }
-    : decision;
+  switch (decision.kind) {
+    case 'reprompt':
+      return { kind: 'reprompt', result: await options.askForConfirmation() };
+    case 'answered':
+      return { kind: 'terminal', result: decision.result };
+    default:
+      return decision;
+  }
 }
 
 /**
@@ -230,7 +237,7 @@ export function inspectConfirmationState<S extends ConfirmationState>(
 
   if (response.action === 'decline') {
     return {
-      kind: 'terminal',
+      kind: 'answered',
       result: {
         content: [{ type: 'text', text: declinedText }],
         structuredContent: { status: 'declined' },
@@ -240,7 +247,7 @@ export function inspectConfirmationState<S extends ConfirmationState>(
 
   if (response.action !== 'accept') {
     return {
-      kind: 'terminal',
+      kind: 'answered',
       result: {
         content: [{ type: 'text', text: cancelledText }],
         structuredContent: { status: 'cancelled' },
