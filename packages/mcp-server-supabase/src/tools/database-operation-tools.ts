@@ -26,6 +26,7 @@ import {
   isFormCapable,
 } from './confirmation.js';
 import {
+  isSqlClassificationFailure,
   regexClassifier,
   type SqlClassificationFailureKind,
   type SqlConfirmationClassifier,
@@ -89,14 +90,7 @@ function toSqlConfirmationReason(
   if (isKnownKey(SQL_CONFIRMATION_REASONS, classification)) {
     return classification;
   }
-  if (
-    typeof classification === 'object' &&
-    classification !== null &&
-    !Array.isArray(classification) &&
-    Object.keys(classification).length === 1 &&
-    'failure' in classification &&
-    isKnownKey(SQL_CLASSIFICATION_FAILURE_OUTCOMES, classification.failure)
-  ) {
+  if (isSqlClassificationFailure(classification)) {
     const { failure } = classification;
     if (SQL_CLASSIFICATION_FAILURE_OUTCOMES[failure] === 'confirm') {
       return 'oversized';
