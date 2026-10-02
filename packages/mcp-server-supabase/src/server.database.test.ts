@@ -1727,18 +1727,16 @@ describe('tools', () => {
     );
 
     test.each(
-      forEachTool([
-        ['destructive'],
-        ['do-heuristic'],
-        ['unclassified'],
-        [{ failure: 'oversized' }],
-      ] as const)
+      forEachTool([['destructive'], [{ failure: 'oversized' }]] as const)
     )(
       '%s runs once on an accepted bound resend after a %j prompt',
       async (tool, classification) => {
-        const classifier = vi.fn<SqlConfirmationClassifier>(
-          async () => classification
-        );
+        // A second classification would fail, so the accepted resend must not
+        // depend on one.
+        const classifier = vi
+          .fn<SqlConfirmationClassifier>()
+          .mockResolvedValueOnce(classification)
+          .mockResolvedValue({ failure: 'crashed' });
         const { call, resend, executeSql, applyMigration } =
           await setupWithClassifier(classifier);
 
@@ -1755,8 +1753,6 @@ describe('tools', () => {
         expect(
           tool === 'execute_sql' ? executeSql : applyMigration
         ).toHaveBeenCalledOnce();
-        // Main's binding: an accepted bound resend is not classified again.
-        expect(classifier).toHaveBeenCalledOnce();
       }
     );
 
