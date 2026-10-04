@@ -120,10 +120,93 @@ export function checkDestructiveQuery(sql: string): boolean {
 const stripQuotedSpans = (sql: string) =>
   sql.replace(/'(?:''|[^'])*'/g, "''").replace(/"(?:""|[^"])*"/g, '""');
 
+const dollarQuoteTag = /\$(?:[a-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/iy;
+
+// Split on semicolons, except those inside a single-quoted string literal
+// (including E'' strings with backslash escapes) or a double-quoted
+// identifier, so `SET note = 'a; b' WHERE ...` stays one statement.
+// Inside dollar-quoted bodies and comments, quotes are not tracked and every
+// semicolon still splits, as before: a function or DO body is code whose
+// statements are checked one by one. If a quote is left unterminated, fall back
+// to the plain split rather than letting it hide the rest of the input.
+function splitStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let start = 0;
+  // The terminator of the dollar-quoted body or comment being skipped, if any.
+  let plainUntil: string | undefined;
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i]!;
+    if (ch === ';') {
+      statements.push(sql.slice(start, i));
+      start = i + 1;
+      i++;
+      continue;
+    }
+    if (plainUntil !== undefined) {
+      if (sql.startsWith(plainUntil, i)) {
+        i += plainUntil.length;
+        plainUntil = undefined;
+      } else {
+        i++;
+      }
+      continue;
+    }
+    if (ch === '$' && !/[\w$\u0080-\uffff]/.test(sql[i - 1] ?? '')) {
+      dollarQuoteTag.lastIndex = i;
+      const tag = dollarQuoteTag.exec(sql)?.[0];
+      if (tag !== undefined) {
+        plainUntil = tag;
+        i += tag.length;
+        continue;
+      }
+    }
+    if (ch === '-' && sql[i + 1] === '-') {
+      plainUntil = '\n';
+      i += 2;
+      continue;
+    }
+    if (ch === '/' && sql[i + 1] === '*') {
+      plainUntil = '*/';
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const backslashEscapes =
+        ch === "'" &&
+        /e/i.test(sql[i - 1] ?? '') &&
+        !/[\w$\u0080-\uffff]/.test(sql[i - 2] ?? '');
+      let j = i + 1;
+      let closed = false;
+      while (j < sql.length) {
+        if (backslashEscapes && sql[j] === '\\') {
+          j += 2;
+        } else if (sql[j] === ch) {
+          if (sql[j + 1] !== ch) {
+            closed = true;
+            break;
+          }
+          j += 2;
+        } else {
+          j++;
+        }
+      }
+      if (!closed) {
+        return sql.split(';');
+      }
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  statements.push(sql.slice(start));
+  return statements;
+}
+
 export function isUpdateWithoutWhere(sql: string): boolean {
-  const updateStatements = sql
-    .split(';')
-    .filter((statement) => statement.trim().toLowerCase().startsWith('update'));
+  const updateStatements = splitStatements(sql).filter((statement) =>
+    statement.trim().toLowerCase().startsWith('update')
+  );
   return updateStatements.some(
     (statement) =>
       updateWithoutWhereRegex.test(statement) &&
