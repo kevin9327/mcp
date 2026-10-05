@@ -155,8 +155,9 @@ const dollarQuoteTag = /\$(?:[a-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/iy;
 // Split on semicolons, except those inside a single-quoted string literal
 // (including E'' strings with backslash escapes) or a double-quoted
 // identifier, so `SET note = 'a; b' WHERE ...` stays one statement.
-// Quoted spans are blanked in the returned statements so a later WHERE check
-// cannot see tokens that only appeared inside a literal.
+// Quoted spans and comment bodies are blanked in the returned statements so a
+// later WHERE check cannot see tokens that only appeared inside a literal or
+// a comment (`-- where needed`).
 // Inside dollar-quoted bodies and comments, quotes are not tracked and every
 // semicolon still splits, as before: a function or DO body is code whose
 // statements are checked one by one. Block comments nest; `--` ends at a bare
@@ -181,8 +182,8 @@ function splitStatements(sql: string): string[] {
     if (inLineComment) {
       if (ch === '\n' || ch === '\r') {
         inLineComment = false;
+        blanked += ch;
       }
-      blanked += ch;
       i++;
       continue;
     }
@@ -205,7 +206,6 @@ function splitStatements(sql: string): string[] {
         i += 2;
         continue;
       }
-      blanked += ch;
       i++;
       continue;
     }

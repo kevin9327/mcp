@@ -108,6 +108,8 @@ describe('isUpdateWithoutWhere', () => {
     "UPDATE films SET title = null; -- it's\nSELECT 'a WHERE b';",
     `SELECT 1 /* outer /* inner */ ' */; UPDATE t SET a = 1; SELECT ' '; -- '`,
     `SELECT 1 AS -- x\r"\n"; UPDATE t SET a = 1; SELECT '"'; -- '`,
+    'UPDATE t SET a = 1 -- todo; add a where clause later',
+    'UPDATE t SET a = 1 -- where needed',
   ])('UPDATE without WHERE still matches: %s', (sql) => {
     expect(isUpdateWithoutWhere(sql)).toBe(true);
   });
