@@ -101,10 +101,13 @@ describe('isUpdateWithoutWhere', () => {
     "UPDATE films SET note = 'a; b';",
     "UPDATE films SET note = 'x'; SELECT * FROM films WHERE id = 1;",
     String.raw`UPDATE films SET note = E'it\'s'; SELECT 1 FROM films WHERE note = 'x';`,
+    String.raw`UPDATE t SET note = E'it\'s done; see where it failed'`,
     "UPDATE films SET title = null; SELECT 'unterminated WHERE x",
     'DO $$ BEGIN PERFORM 1; UPDATE films SET title = null; END $$;',
     "SELECT $$it's$$; UPDATE films SET title = null; SELECT 'a WHERE b';",
     "UPDATE films SET title = null; -- it's\nSELECT 'a WHERE b';",
+    `SELECT 1 /* outer /* inner */ ' */; UPDATE t SET a = 1; SELECT ' '; -- '`,
+    `SELECT 1 AS -- x\r"\n"; UPDATE t SET a = 1; SELECT '"'; -- '`,
   ])('UPDATE without WHERE still matches: %s', (sql) => {
     expect(isUpdateWithoutWhere(sql)).toBe(true);
   });
